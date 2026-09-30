@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Siber Labirent: Çekirdeğe Kaçış</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --neon-green: #00ff00;
+            --dark-bg: #050505;
+            --terminal-bg: rgba(0, 20, 0, 0.8);
+            --error-red: #ff3333;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--dark-bg);
+            color: var(--neon-green);
+            font-family: Arial, Helvetica, sans-serif;
+            overflow: hidden; /* Prevent scroll */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* Matrix Canvas Background */
+        #matrix-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            opacity: 0.15; /* Subtle in background normally */
+            transition: opacity 2s ease-in-out;
+        }
+
+        #matrix-canvas.active {
+            opacity: 0.8; /* Bright on victory */
+        }
+
+        /* Scanline overlay for retro CRT effect */
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(
+                to bottom,
+                rgba(255,255,255,0),
+                rgba(255,255,255,0) 50%,
+                rgba(0,0,0,0.2) 50%,
+                rgba(0,0,0,0.2)
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        /* Custom Styles */
+        .neon-text {
+            text-shadow: 0 0 5px var(--neon-green), 0 0 10px var(--neon-green), 0 0 20px var(--neon-green);
+        }
+
+        .neon-border {
+            border: 1px solid var(--neon-green);
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3), inset 0 0 10px rgba(0, 255, 0, 0.2);
+        }
+
+        .terminal-box {
+            background-color: var(--terminal-bg);
+            border-left: 4px solid var(--neon-green);
+        }
+
+        .terminal-input-wrapper {
+            display: flex;
+            align-items: center;
+            background: #000;
+            border: 1px solid #333;
+            padding: 10px;
+        }
+
+        .terminal-input-wrapper::before {
+            content: 'root@piksel:~$ ';
+            color: #00aa00;
+            margin-right: 10px;
+            white-space: nowrap;
+        }
+
+        input[type="text"] {
+            background: transparent;
+            border: none;
+            color: var(--neon-green);
+            font-family: inherit;
+            font-size: 1.1rem;
+            width: 100%;
+            outline: none;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--dark-bg); 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--neon-green); 
+        }
+
+        /* Animations */
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        .cursor-blink {
+            animation: blink 1s step-end infinite;
+        }
+
+        @keyframes glitch {
+            2%, 64% { transform: translate(2px,0) skew(0deg); }
+            4%, 60% { transform: translate(-2px,0) skew(0deg); }
+            62% { transform: translate(0,0) skew(5deg); }
+        }
+        .glitch-text {
+            animation: glitch 1s linear infinite;
+            position: relative;
+        }
+
+        /* Locked Door ASCII art style */
+        .door-visual {
+            font-family: monospace;
+            white-space: pre;
+            line-height: 1.2;
+            color: #888;
+            text-align: center;
+            margin: 20px 0;
+            transition: color 0.5s, text-shadow 0.5s;
+        }
+        .door-visual.unlocked {
+            color: var(--neon-green);
+            text-shadow: 0 0 10px var(--neon-green);
+        }
+        
+        .error-text {
+            color: var(--error-red);
+            text-shadow: 0 0 5px var(--error-red);
+        }
+        
+        /* Monospace for specific terminal/code elements */
+        .mono-font {
+            font-family: 'Courier New', Courier, monospace;
+        }
+    </style>
+</head>
+<body>
+    <!-- Background Effects -->
+    <canvas id="matrix-canvas"></canvas>
+    <div class="scanlines"></div>
+
+    <main class="w-full max-w-5xl h-[95vh] flex flex-col relative z-10 p-2 md:p-4">
+        
+        <!-- App Wrapper with Neon Styling -->
+        <div class="neon-border bg-black/80 flex-grow flex flex-col rounded-lg overflow-hidden relative">
+            
+            <!-- Header -->
+            <header class="border-b border-[#00ff00]/40 p-3 bg-[#001100] flex justify-center items-center relative">
+                <span class="absolute left-3 md:left-5 text-[#00ff00] font-bold tracking-wider text-sm md:text-base mono-font opacity-80">BİLFEN</span>
+                <h1 class="text-xl md:text-2xl text-center font-bold tracking-widest uppercase mono-font">
+                    > SİBER LABİRENT_
+                    <span class="cursor-blink">|</span>
+                </h1>
+                <span class="absolute right-3 md:right-5 text-[#00ff00] font-bold tracking-wider text-sm md:text-base mono-font opacity-80">IPT</span>
+            </header>
+
+            <!-- Inner Content Area -->
+            <div class="p-3 md:p-5 flex-grow flex flex-col" id="main-content">
+                
+                <!-- INTRO SCREEN -->
+                <div id="intro-screen" class="flex flex-col items-center justify-center h-full space-y-4 animate-fade-in">
+                    <h2 class="text-2xl md:text-3xl neon-text mb-2 glitch-text font-bold">SİBER LABİRENTE HOŞ GELDİN!</h2>
+                    
+                    <div class="terminal-box p-4 rounded text-base md:text-lg leading-relaxed max-w-3xl text-[#ccffcc] mono-font">
+                        <p class="mb-2">"Merhaba Piksel! Bilişim laboratuvarımızın ana çekirdeğine bir virüs sızdı ve tüm kapıları kilitledi. Sistemde mahsur kaldık!</p>
+                        <p class="mb-2">Kapıları açmanın tek yolu, kapı kilitlerindeki <span class="text-white bg-red-900 px-1">'bozuk verileri'</span> Python String fonksiyonlarını kullanarak temizlemek.</p>
+                        
+                        <h3 class="text-lg neon-text mt-4 mb-1">> Görev Kuralları:</h3>
+                        <ul class="list-none space-y-1 ml-4 text-sm md:text-base">
+                            <li><span class="text-[#00ff00]">></span> Karşına çıkan her bozuk veri için terminale <strong>tam Python kodunu</strong> yazmalısın.<br>
+                                <span class="text-gray-400 ml-4">(Örn: Sadece <code>lower()</code> değil, <code>sifre.lower()</code> yazmalısın.)</span></li>
+                            <li><span class="text-[#00ff00]">></span> Kodun doğru çalışmazsa kapı açılmaz! Hatanı bulup tekrar denemelisin.</li>
+                            <li><span class="text-[#00ff00]">></span> Bu gizli bir görevdir, herkes kendi terminalinden sorumludur.</li>
+                        </ul>
+                    </div>
+
+                    <button id="start-btn" class="mt-4 px-6 py-3 bg-transparent border-2 border-[#00ff00] text-[#00ff00] font-bold text-lg uppercase tracking-wider hover:bg-[#00ff00] hover:text-black transition-all duration-300 neon-text cursor-pointer group mono-font">
+                        [ Sisteme Giriş Yap ]
+                    </button>
+                </div>
+
+                <!-- GAME SCREEN -->
+                <div id="game-screen" class="hidden flex-col h-full flex-grow">
+                    
+                    <!-- Progress / Level Indicator -->
+                    <div class="flex justify-between items-center mb-2 text-sm text-[#88ff88] border-b border-[#004400] pb-1 mono-font font-bold">
+                        <span>Ajan: Piksel</span>
+                        <span id="level-indicator">Kapı: 1/6</span>
+                    </div>
+
+                    <!-- Scenario Text (Typewriter effect container) -->
+                    <div id="scenario-container" class="mb-2 min-h-[60px] text-base md:text-lg text-white font-semibold">
+                        <!-- Text injected via JS -->
+                    </div>
+
+                    <!-- Door Visual -->
+                    <div class="flex-grow flex items-center justify-center min-h-[120px]">
+                        <div id="door-visual" class="door-visual text-[8px] md:text-[10px] select-none mono-font font-bold">
+<!-- door ascii -->
+ _________________ 
+|  _   _   _   _  |
+| | | | | | | | | |
+| |_| |_| |_| |_| |
+|  _   _   _   _  |
+| | | | | | | | | |
+| |_| |_| |_| |_| |
+|     KİLİTLİ     |
+|_________________|
+                        </div>
+                    </div>
+
+                    <!-- Data Display -->
+                    <div class="bg-[#111] border border-dashed border-[#555] p-3 rounded mb-3 mt-2">
+                        <span class="text-gray-400 block mb-1 text-xs mono-font">// Tespit Edilen Bozuk Veri:</span>
+                        <code id="data-display" class="text-lg md:text-xl text-yellow-300 font-bold tracking-wide mono-font block text-center">
+                            <!-- Data injected via JS -->
+                        </code>
+                    </div>
+
+                    <!-- Terminal Input -->
+                    <div class="mt-auto">
+                        <div class="terminal-input-wrapper rounded-t mono-font">
+                            <input type="text" id="terminal-input" placeholder="Komutu buraya yazın..." autocomplete="off" spellcheck="false" class="mono-font font-bold">
+                        </div>
+                        <button id="run-btn" class="w-full bg-[#003300] hover:bg-[#005500] text-[#0f0] border-x border-b border-[#333] py-2 text-base md:text-lg font-bold tracking-widest transition-colors mono-font">
+                            KODU ÇALIŞTIR_
+                        </button>
+                    </div>
+
+                    <!-- Feedback Message -->
+                    <div id="feedback-message" class="mt-2 h-6 text-center text-sm md:text-base font-bold opacity-0 transition-opacity duration-300">
+                        <!-- Feedback injected via JS -->
+                    </div>
+                </div>
+
+                <!-- SUCCESS SCREEN -->
+                <div id="success-screen" class="hidden flex-col items-center justify-center h-full text-center space-y-6 z-20 relative">
+                    <h2 class="text-3xl md:text-4xl neon-text font-bold mb-2 animate-pulse">SİSTEM KURTARILDI!</h2>
+                    
+                    <div class="door-visual unlocked text-xs md:text-sm my-4 neon-text mono-font font-bold">
+                        <!-- unlocked door ascii -->
+       \       /       
+        \     /        
+ _________________ 
+|                 |
+|    E R İ Ş İ M  |
+|                 |
+|      O N A Y    |
+|                 |
+|_________________|
+                    </div>
+
+                    <p class="text-xl text-white font-bold">TEBRİKLER PİKSEL!</p>
+                    <p class="text-base md:text-lg text-[#aaffaa] max-w-lg mx-auto terminal-box p-3 mono-font">
+                        Tüm güvenlik duvarlarını aştın ve çekirdeği virüsten temizledin. Bilişim laboratuvarı sana minnettar!
+                    </p>
+                    
+                    <button onclick="location.reload()" class="mt-4 px-6 py-3 border border-[#0f0] hover:bg-[#0f0] hover:text-black transition-colors font-bold mono-font text-lg">
+                        [ Yeni Görev Başlat ]
+                    </button>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Game Data Array
+        const levels = [
+            {
+                door: 1,
+                scenario: "Kapı gereksiz boşluklardan oluşan sarmaşıklarla kaplanmış. Sistemin <code>gecit_izni</code> adlı değişkenindeki gereksiz boşlukları temizle!",
+                dataText: 'gecit_izni = "   gecit_izni   "',
+                // Acceptable answers (ignoring outer whitespace)
+                expected: ['gecit_izni.strip()'],
+                hint: "Sarmaşıklar kesilmedi! Noktayı veya parantezleri unutmuş olabilir misin?"
+            },
+            {
+                door: 2,
+                scenario: "Güvenlik radarı sadece BÜYÜK HARFLE yazılan komutları anlıyor. Sisteme verilen <code>komut</code> değişkenini tamamen büyük harfe çevir.",
+                dataText: 'komut = "kapıyı aç"',
+                expected: ['komut.upper()'],
+                hint: "Radar seni tespit edemedi! Komutu büyütmek için hangi fonksiyonu kullanıyorduk?"
+            },
+            {
+                door: 3,
+                scenario: "Geçiş köprüsü çökmüş durumda! <code>durum</code> değişkeninin içindeki 'Çöktü' kelimesini 'Aktif' kelimesi ile değiştirerek köprüyü onar.",
+                dataText: 'durum = "Sistem Durumu: Çöktü"',
+                // Accommodate variations in quotes and spacing around commas
+                expected: [
+                    'durum.replace("Çöktü","Aktif")',
+                    "durum.replace('Çöktü','Aktif')"
+                ],
+                // We will preprocess input to remove spaces after comma for easier matching
+                preprocess: true, 
+                hint: "Köprü hala bozuk! Önce eski kelimeyi, sonra yeni kelimeyi virgülle ayırarak yazmayı unutma. Tırnak işaretlerine dikkat et!"
+            },
+            {
+                door: 4,
+                scenario: "Kapıdaki lazer tarayıcı, parolanın kaç karakterden oluştuğunu bilmek istiyor. <code>parola</code> değişkeninin uzunluğunu bul.",
+                dataText: 'parola = "Bilfen2026"',
+                expected: ['len(parola)'],
+                hint: "Eksik karakter sayımı! len() fonksiyonunun içine değişkenin adını yazmayı unuttun mu?"
+            },
+            {
+                door: 5,
+                scenario: "Son çıkış kapısına geldik ama anahtarlar birbirine yapışık halde! <code>anahtarlar</code> değişkenindeki kelimeleri virgüllerden (,) parçalayarak ayır.",
+                dataText: 'anahtarlar = "Alfa,Beta,Gama"',
+                expected: [
+                    'anahtarlar.split(",")',
+                    "anahtarlar.split(',')"
+                ],
+                preprocess: true,
+                hint: "Anahtarlar ayrılamadı! Parantez içine ayırıcı işareti (virgülü) tırnak içinde yazdığından emin ol."
+            },
+            {
+                door: 6,
+                scenario: "Çekirdeğe ulaştın! Son olarak kimliğini sisteme kaydetmelisin. İsim ve puan değişkenlerini <code>format()</code> fonksiyonu ile boşluklara ({}) yerleştir.",
+                dataText: 'isim = "Piksel"<br>puan = 100<br>rapor = "Görev tamamlandı {}. Toplam puanınız: {}"',
+                expected: [
+                    'rapor.format(isim,puan)'
+                ],
+                preprocess: true,
+                hint: "Sistem kimliğini doğrulayamadı! format() içine değişken isimlerini sırasıyla, virgülle ayırarak yazmalısın."
+            }
+        ];
+
+        let currentLevel = 0;
+        let isTyping = false;
+
+        // DOM Elements
+        const introScreen = document.getElementById('intro-screen');
+        const gameScreen = document.getElementById('game-screen');
+        const successScreen = document.getElementById('success-screen');
+        const startBtn = document.getElementById('start-btn');
+        const runBtn = document.getElementById('run-btn');
+        const terminalInput = document.getElementById('terminal-input');
+        const scenarioContainer = document.getElementById('scenario-container');
+        const dataDisplay = document.getElementById('data-display');
+        const levelIndicator = document.getElementById('level-indicator');
+        const feedbackMessage = document.getElementById('feedback-message');
+        const doorVisual = document.getElementById('door-visual');
+        const matrixCanvas = document.getElementById('matrix-canvas');
+
+        startBtn.addEventListener('click', () => {
+            introScreen.classList.add('hidden');
+            gameScreen.classList.remove('hidden');
+            gameScreen.classList.add('flex');
+            loadLevel();
+        });
+
+        function typeWriter(text, element, speed = 30) {
+            return new Promise(resolve => {
+                element.innerHTML = '';
+                let i = 0;
+                isTyping = true;
+                
+                // Keep HTML tags intact while typing
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = text;
+                const charArray = [];
+                
+                function extractNodes(node) {
+                    if (node.nodeType === 3) { // Text node
+                        const chars = node.nodeValue.split('');
+                        chars.forEach(c => charArray.push(c));
+                    } else if (node.nodeType === 1) { // Element node
+                        charArray.push(`<${node.tagName.toLowerCase()}${node.className ? ` class="${node.className}"` : ''}>`);
+                        node.childNodes.forEach(extractNodes);
+                        charArray.push(`</${node.tagName.toLowerCase()}>`);
+                    }
+                }
+                
+                tempDiv.childNodes.forEach(extractNodes);
+                
+                let currentHTML = "";
+                
+                function type() {
+                    if (i < charArray.length) {
+                        let nextStr = charArray[i];
+                        // If it's an opening HTML tag, grab the whole tag and its closing tag instantly (simplified for this specific use case)
+                        if (nextStr.startsWith('<')) {
+                             currentHTML += nextStr;
+                        } else {
+                             currentHTML += nextStr;
+                        }
+                        element.innerHTML = currentHTML + '<span class="cursor-blink text-[#0f0]">_</span>';
+                        i++;
+                        setTimeout(type, nextStr.startsWith('<') ? 0 : speed);
+                    } else {
+                        element.innerHTML = currentHTML;
+                        isTyping = false;
+                        resolve();
+                    }
+                }
+                type();
+            });
+        }
+
+        function loadLevel() {
+            if (currentLevel >= levels.length) {
+                showSuccess();
+                return;
+            }
+
+            const level = levels[currentLevel];
+            levelIndicator.innerText = `Kapı: ${level.door}/6`;
+            dataDisplay.innerHTML = level.dataText;
+            terminalInput.value = '';
+            terminalInput.disabled = true;
+            runBtn.disabled = true;
+            
+            // Reset door visual
+            doorVisual.classList.remove('unlocked');
+            doorVisual.innerHTML = ` _________________ \n|  _   _   _   _  |\n| | | | | | | | | |\n| |_| |_| |_| |_| |\n|  _   _   _   _  |\n| | | | | | | | | |\n| |_| |_| |_| |_| |\n|     KİLİTLİ     |\n|_________________|`;
+            
+            feedbackMessage.style.opacity = 0;
+
+            typeWriter(`>_ ${level.scenario}`, scenarioContainer, 25).then(() => {
+                terminalInput.disabled = false;
+                runBtn.disabled = false;
+                terminalInput.focus();
+            });
+        }
+
+        function validateAnswer() {
+            if (isTyping) return; // Prevent clicking while typing
+
+            const level = levels[currentLevel];
+            let rawInput = terminalInput.value.trim();
+            
+            // Basic formatting to make grading forgiving for kids
+            let processedInput = rawInput;
+            if (level.preprocess) {
+                // Remove spaces around commas and equals for specific levels
+                processedInput = processedInput.replace(/\s*,\s*/g, ',');
+            }
+            // Remove all spaces for super lenient checking on structure (optional, but let's stick to specific preprocess)
+            // Just remove accidental double spaces globally
+            processedInput = processedInput.replace(/\s+/g, ' ');
+
+            let isCorrect = false;
+            for (let expected of level.expected) {
+                let checkExpected = expected;
+                if(level.preprocess) checkExpected = expected.replace(/\s*,\s*/g, ',');
+                
+                if (processedInput === checkExpected || rawInput === expected) {
+                    isCorrect = true;
+                    break;
+                }
+            }
+
+            if (isCorrect) {
+                // Unlock Animation
+                feedbackMessage.innerHTML = `<span class="text-[#0f0]">[BAŞARILI] Güvenlik duvarı aşıldı!</span>`;
+                feedbackMessage.style.opacity = 1;
+                
+                doorVisual.classList.add('unlocked');
+                doorVisual.innerHTML = `       \\       /       \n        \\     /        \n _________________ \n|                 |\n|    E R İ Ş İ M  |\n|                 |\n|      O N A Y    |\n|                 |\n|_________________|`;
+                
+                terminalInput.disabled = true;
+                runBtn.disabled = true;
+
+                setTimeout(() => {
+                    currentLevel++;
+                    loadLevel();
+                }, 2000);
+            } else {
+                feedbackMessage.innerHTML = `<span class="error-text">[HATA] ${level.hint}</span>`;
+                feedbackMessage.style.opacity = 1;
+                terminalInput.classList.add('border-red-500');
+                
+                // Shake effect on input
+                terminalInput.parentElement.style.transform = 'translate(5px)';
+                setTimeout(()=> terminalInput.parentElement.style.transform = 'translate(-5px)', 50);
+                setTimeout(()=> terminalInput.parentElement.style.transform = 'translate(5px)', 100);
+                setTimeout(()=> terminalInput.parentElement.style.transform = 'translate(0)', 150);
+
+                setTimeout(() => {
+                    terminalInput.classList.remove('border-red-500');
+                    feedbackMessage.style.opacity = 0;
+                }, 4000);
+            }
+        }
+
+        // Event Listeners for Validation
+        runBtn.addEventListener('click', validateAnswer);
+        terminalInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') validateAnswer();
+        });
+
+        function showSuccess() {
+            gameScreen.classList.add('hidden');
+            gameScreen.classList.remove('flex');
+            
+            successScreen.classList.remove('hidden');
+            successScreen.classList.add('flex');
+            
+            matrixCanvas.classList.add('active');
+        }
+
+        // --- Matrix Digital Rain Canvas Effect ---
+        const ctx = matrixCanvas.getContext('2d');
+        
+        function resizeCanvas() {
+            matrixCanvas.width = window.innerWidth;
+            matrixCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%^&*(){}[];:<>?'.split('');
+        const fontSize = 16;
+        let columns = matrixCanvas.width / fontSize;
+        let drops = [];
+
+        for (let x = 0; x < columns; x++) {
+            drops[x] = Math.random() * matrixCanvas.height;
+        }
+
+        function drawMatrix() {
+            // Semi-transparent black to create trail effect
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+            ctx.fillRect(0, 0, matrixCanvas.width, matrixCanvas.height);
+
+            ctx.fillStyle = '#0F0'; // Neon green text
+            ctx.font = fontSize + 'px monospace';
+
+            for (let i = 0; i < drops.length; i++) {
+                const text = chars[Math.floor(Math.random() * chars.length)];
+                
+                // Draw character
+                ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+
+                // Reset drop to top randomly to create staggered fall
+                if (drops[i] * fontSize > matrixCanvas.height && Math.random() > 0.975) {
+                    drops[i] = 0;
+                }
+                
+                drops[i]++;
+            }
+        }
+
+        // Start Matrix background loop
+        setInterval(drawMatrix, 33);
+        
+        // Recalculate columns on resize to prevent stretching gaps
+        window.addEventListener('resize', () => {
+             columns = matrixCanvas.width / fontSize;
+             drops = [];
+             for (let x = 0; x < columns; x++) drops[x] = 1;
+        });
+
+    </script>
+</body>
+</html>
